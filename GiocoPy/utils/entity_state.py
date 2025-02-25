@@ -11,3 +11,10 @@ class AttackState(Enum):
     RECOVERING = 3
     END_RECOVERING1 = 4
     END_RECOVERING2 = 5
+
+class AuraState(Enum):
+    IDLE = 1
+    START_RECOVERING = 2
+    RECOVERING = 3
+    END_RECOVERING1 = 4
+    END_RECOVERING2 = 5

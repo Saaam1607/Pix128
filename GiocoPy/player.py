@@ -4,9 +4,11 @@ import utils.entity_state as entity_state
 from bullet import Bullet
 from heart import Heart
 from energy_bar import EnergyBar
+from aura import Aura
 
 fullRecoverAnimationDelay = 20
 shootingAnimationDelay = 5
+recoverStartDelay = 20
 
 
 
@@ -24,6 +26,7 @@ class Player(pygame.sprite.Sprite):
         self.bullet_image_path = bullet_image_path
         self.full_recover_animation_delay = fullRecoverAnimationDelay
         self.shooting_animation_delay = shootingAnimationDelay
+        self.recover_start_delay = recoverStartDelay
 
         self.x = 0
         self.y = variables.SCREEN_HEIGHT - variables.TERRAIN_HEIGHT - self.height
@@ -37,7 +40,10 @@ class Player(pygame.sprite.Sprite):
         self.energy = EnergyBar(energies, energy_recovery_delay - 1)
         self.shootDelay = variables.BULLET_DELAY
         self.attack_state = entity_state.AttackState.IDLE
+        self.aura_state = entity_state.AuraState.IDLE
+        self.aura = Aura(self.rect.x - 10, self.rect.y - 10)
 
+        self.recover_scream = pygame.mixer.Sound("./sounds/recover_scream.mp3")
 
     def get_center(self):
         return (self.rect.x + self.width / 2, self.rect.y + self.height / 2)
@@ -59,10 +65,20 @@ class Player(pygame.sprite.Sprite):
         sound = pygame.mixer.Sound("./sounds/jump.wav")
         sound.play()
 
+    def play_recover_sound(self):
+        self.recover_scream.play()
+
+    def stop_recover_sound(self):
+        self.recover_scream.stop()
+
+    def play_aura_end_sound(self):
+        sound = pygame.mixer.Sound("./sounds/aura_end.mp3")
+        sound.play()
+
         
     def shoot(self):
         mouse_state = pygame.mouse.get_pressed()
-        if mouse_state[0] and self.attack_state != entity_state.AttackState.RECOVERING and self.attack_state != entity_state.AttackState.END_RECOVERING1 and self.attack_state != entity_state.AttackState.END_RECOVERING2:
+        if mouse_state[0] and self.aura_state == entity_state.AuraState.IDLE:
             if (self.energy.get_available_energy() >= 5 and self.shootDelay == 0):
                 self.attack_state = entity_state.AttackState.SHOOTING
                 mouse_pos = pygame.mouse.get_pos()
@@ -90,11 +106,10 @@ class Player(pygame.sprite.Sprite):
             if (self.shootDelay > 0):
                 self.shootDelay -= 1
 
-            if (self.attack_state == entity_state.AttackState.RECOVERING):
+            if (self.aura_state == entity_state.AuraState.RECOVERING):
                 if (self.energy.get_available_energy() < self.energies):
                     self.energy.recover_energy()
           
-
 
     def bullets_move(self):
         self.bullets_group.update()
@@ -121,42 +136,58 @@ class Player(pygame.sprite.Sprite):
             elif (bullet.rect.y > variables.SCREEN_HEIGHT + 50):
                 bullet.kill()
 
+    def updateAuraState(self):
 
+        key = pygame.key.get_pressed()
+        if key[pygame.K_s]: 
+            if (self.aura_state == entity_state.AuraState.IDLE):
+                if (self.gravity == 0 and self.energy.get_available_energy() != self.energies):
+                    self.aura_state = entity_state.AuraState.START_RECOVERING
+            elif (self.aura_state == entity_state.AuraState.START_RECOVERING):
+                if (self.recover_start_delay > 0):
+                    self.recover_start_delay -= 1
+                else:
+                    self.recover_start_delay = recoverStartDelay
+                    self.aura_state = entity_state.AuraState.RECOVERING
+                    self.play_recover_sound()
+                    self.aura.resetAnimation()
+        elif (self.aura_state == entity_state.AuraState.START_RECOVERING or self.aura_state == entity_state.AuraState.RECOVERING):
+            self.aura_state = entity_state.AuraState.IDLE
+            self.stop_recover_sound()
+        if (self.aura_state == entity_state.AuraState.RECOVERING):
+            if (self.energy.get_available_energy() == self.energies):
+                self.aura_state = entity_state.AuraState.END_RECOVERING1
+                self.stop_recover_sound()
+                self.play_aura_end_sound()
+        elif (self.aura_state == entity_state.AuraState.END_RECOVERING1):
+            if (self.full_recover_animation_delay > 0):
+                self.full_recover_animation_delay -= 1
+            else:
+                self.full_recover_animation_delay = fullRecoverAnimationDelay
+                self.aura_state = entity_state.AuraState.END_RECOVERING2
+        elif (self.aura_state == entity_state.AuraState.END_RECOVERING2):
+            if (self.full_recover_animation_delay > 0):
+                self.full_recover_animation_delay -= 1
+            else:
+                self.full_recover_animation_delay = fullRecoverAnimationDelay
+                self.aura_state = entity_state.AuraState.IDLE
+        
     def move(self):
 
         dx = 0
         dy = 0
 
-        if (self.attack_state == entity_state.AttackState.RECOVERING and self.energy.get_available_energy() == self.energies):
-            self.attack_state = entity_state.AttackState.END_RECOVERING1
-        elif (self.attack_state == entity_state.AttackState.END_RECOVERING1):
-            if (self.full_recover_animation_delay > 0):
-                self.full_recover_animation_delay -= 1
-            else:
-                self.full_recover_animation_delay = fullRecoverAnimationDelay
-                self.attack_state = entity_state.AttackState.END_RECOVERING2
-        elif (self.attack_state == entity_state.AttackState.END_RECOVERING2):
-            if (self.full_recover_animation_delay > 0):
-                self.full_recover_animation_delay -= 1
-            else:
-                self.full_recover_animation_delay = fullRecoverAnimationDelay
-                self.attack_state = entity_state.AttackState.IDLE
-        elif (self.attack_state == entity_state.AttackState.SHOOTING):
+        if (self.attack_state == entity_state.AttackState.SHOOTING):
             if (self.shooting_animation_delay > 0):
                 self.shooting_animation_delay -= 1
             else:
                 self.shooting_animation_delay = shootingAnimationDelay
                 self.attack_state = entity_state.AttackState.IDLE
-        else:
-            self.attack_state = entity_state.AttackState.IDLE
-
 
         # handle movement keys
-        key = pygame.key.get_pressed()
-        if key[pygame.K_s] and self.gravity == 0 and self.energy.get_available_energy() != self.energies:
-            self.attack_state = entity_state.AttackState.RECOVERING
-        else:
-            # self.attack_state = entity_state.AttackState.IDLE
+        if (self.aura_state != entity_state.AuraState.RECOVERING):
+            key = pygame.key.get_pressed()
+            self.stop_recover_sound()
             if key[pygame.K_a]:
                 if (self.rect.x > 0):
                     dx -= self.speed
@@ -195,11 +226,13 @@ class Player(pygame.sprite.Sprite):
 
 
     def update_sprite(self):
-        if (self.attack_state == entity_state.AttackState.RECOVERING):
+        if (self.aura_state == entity_state.AuraState.START_RECOVERING):
+            self.image = pygame.image.load("./images/player/player_recovering_start.png")
+        elif (self.aura_state == entity_state.AuraState.RECOVERING):
             self.image = pygame.image.load("./images/player/player_recovering.png")
-        elif (self.attack_state == entity_state.AttackState.END_RECOVERING1):
+        elif (self.aura_state == entity_state.AuraState.END_RECOVERING1):
             self.image = pygame.image.load("./images/player/player_recovering_full1.png")
-        elif (self.attack_state == entity_state.AttackState.END_RECOVERING2):
+        elif (self.aura_state == entity_state.AuraState.END_RECOVERING2):
             self.image = pygame.image.load("./images/player/player_recovering_full2.png")
         elif (self.attack_state == entity_state.AttackState.IDLE and self.state == entity_state.State.GROUND):
             self.image = pygame.image.load("./images/player/player.png")
@@ -218,7 +251,9 @@ class Player(pygame.sprite.Sprite):
         self.check_bullet_collision(enemy_bullets_group)
 
     def update(self):
+        self.updateAuraState()
         self.move()
+        self.aura.update(self.rect.x, self.rect.y)
         self.update_sprite()
         self.shoot()
         
@@ -227,4 +262,7 @@ class Player(pygame.sprite.Sprite):
         self.bullets_group.draw(screen)
         self.hearts_group.draw(screen)
         self.energy.draw(screen)
+    
         screen.blit(self.image, self.rect)
+        if (self.aura_state == entity_state.AuraState.RECOVERING):
+            self.aura.draw(screen)
