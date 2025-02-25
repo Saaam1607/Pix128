@@ -4,13 +4,13 @@ import utils.entity_state as entity_state
 from bullet import Bullet
 from heart import Heart
 from energy_bar import EnergyBar
+from sub_energy_bar import SubEnergyBar
 from aura import Aura
 
-fullRecoverAnimationDelay = 20
-shootingAnimationDelay = 5
+fullRecoverAnimationDelay = 14
+shootingAnimationDelay = 8
 recoverStartDelay = 20
-
-
+subEnergyRequired = 15
 
 class Player(pygame.sprite.Sprite):
 
@@ -21,6 +21,7 @@ class Player(pygame.sprite.Sprite):
         self.rect = pygame.Rect(0, variables.SCREEN_HEIGHT - variables.TERRAIN_HEIGHT - self.height, self.width, self.height)
         self.speed = speed
         self.energies = energies
+        self.sub_energies = 0
         self.bullet_speed = bullet_speed
         self.bullet_delay = bullet_delay
         self.bullet_image_path = bullet_image_path
@@ -35,9 +36,11 @@ class Player(pygame.sprite.Sprite):
         self.gravity = 0
         self.bullets_group = pygame.sprite.Group()
         self.hearts_group = pygame.sprite.Group()
+        self.number_of_energy_hearts = 0
         for i in range(lifepoints):
             self.hearts_group.add(Heart(10 + 80 * i, 10, 70, 60, "./images/hearth.png"))
         self.energy = EnergyBar(energies, energy_recovery_delay - 1)
+        self.sub_energy = SubEnergyBar(subEnergyRequired, energy_recovery_delay + 1)
         self.shootDelay = variables.BULLET_DELAY
         self.attack_state = entity_state.AttackState.IDLE
         self.aura_state = entity_state.AuraState.IDLE
@@ -109,6 +112,9 @@ class Player(pygame.sprite.Sprite):
             if (self.aura_state == entity_state.AuraState.RECOVERING):
                 if (self.energy.get_available_energy() < self.energies):
                     self.energy.recover_energy()
+            elif (self.aura_state == entity_state.AuraState.SUB_RECOVERING):
+                if (self.sub_energy.get_available_energy() < subEnergyRequired):
+                    self.sub_energy.recover_energy()
           
 
     def bullets_move(self):
@@ -120,12 +126,13 @@ class Player(pygame.sprite.Sprite):
             if (pygame.sprite.collide_mask(bullet, self)):
                 bullet.kill()
                 last_heart = self.hearts_group.sprites()[-1]
+                if (last_heart.image_path == "./images/energy_hearth.png"):
+                    self.number_of_energy_hearts -= 1
                 last_heart.kill()
                 if (len(self.hearts_group) > 0):
                     self.play_damage_sound()
                 else:
                     self.play_death_sound()
-
 
     def check_bullet_out(self):
         for bullet in self.bullets_group:
@@ -137,21 +144,30 @@ class Player(pygame.sprite.Sprite):
                 bullet.kill()
 
     def updateAuraState(self):
-
         key = pygame.key.get_pressed()
         if key[pygame.K_s]: 
             if (self.aura_state == entity_state.AuraState.IDLE):
-                if (self.gravity == 0 and self.energy.get_available_energy() != self.energies):
-                    self.aura_state = entity_state.AuraState.START_RECOVERING
+                if (self.gravity == 0):
+                    if (self.energy.get_available_energy() != self.energies or self.sub_energy.get_available_energy() != subEnergyRequired):
+                        self.aura_state = entity_state.AuraState.START_RECOVERING
+                    elif (self.sub_energy.get_available_energy() == subEnergyRequired and self.number_of_energy_hearts < 2):
+                        self.aura_state = entity_state.AuraState.SUB_RECOVERING
+                    
             elif (self.aura_state == entity_state.AuraState.START_RECOVERING):
                 if (self.recover_start_delay > 0):
                     self.recover_start_delay -= 1
                 else:
-                    self.recover_start_delay = recoverStartDelay
-                    self.aura_state = entity_state.AuraState.RECOVERING
-                    self.play_recover_sound()
-                    self.aura.resetAnimation()
-        elif (self.aura_state == entity_state.AuraState.START_RECOVERING or self.aura_state == entity_state.AuraState.RECOVERING):
+                    if (self.energy.get_available_energy() != self.energies):
+                        self.aura_state = entity_state.AuraState.RECOVERING
+                        self.recover_start_delay = recoverStartDelay
+                        self.play_recover_sound()
+                        self.aura.resetAnimation()
+                    elif (self.sub_energy.get_available_energy() != subEnergyRequired):
+                        self.aura_state = entity_state.AuraState.SUB_RECOVERING
+                        self.recover_start_delay = recoverStartDelay
+                        self.play_recover_sound()
+                        self.aura.resetAnimation()
+        elif (self.aura_state == entity_state.AuraState.START_RECOVERING or self.aura_state == entity_state.AuraState.RECOVERING or self.aura_state == entity_state.AuraState.SUB_RECOVERING):
             self.aura_state = entity_state.AuraState.IDLE
             self.stop_recover_sound()
         if (self.aura_state == entity_state.AuraState.RECOVERING):
@@ -159,6 +175,15 @@ class Player(pygame.sprite.Sprite):
                 self.aura_state = entity_state.AuraState.END_RECOVERING1
                 self.stop_recover_sound()
                 self.play_aura_end_sound()
+        elif (self.aura_state == entity_state.AuraState.SUB_RECOVERING):
+            if (self.sub_energy.get_available_energy() == subEnergyRequired):
+                self.aura_state = entity_state.AuraState.END_RECOVERING1
+                self.stop_recover_sound()
+                self.play_aura_end_sound()
+                if (self.number_of_energy_hearts < 2):
+                    self.hearts_group.add(Heart(10 + 80 * len(self.hearts_group), 10, 70, 60, "./images/energy_hearth.png"))
+                    self.number_of_energy_hearts += 1
+                    self.sub_energy.consume_energy()
         elif (self.aura_state == entity_state.AuraState.END_RECOVERING1):
             if (self.full_recover_animation_delay > 0):
                 self.full_recover_animation_delay -= 1
@@ -185,7 +210,7 @@ class Player(pygame.sprite.Sprite):
                 self.attack_state = entity_state.AttackState.IDLE
 
         # handle movement keys
-        if (self.aura_state != entity_state.AuraState.RECOVERING):
+        if (self.aura_state != entity_state.AuraState.RECOVERING and self.aura_state != entity_state.AuraState.SUB_RECOVERING):
             key = pygame.key.get_pressed()
             self.stop_recover_sound()
             if key[pygame.K_a]:
@@ -228,7 +253,7 @@ class Player(pygame.sprite.Sprite):
     def update_sprite(self):
         if (self.aura_state == entity_state.AuraState.START_RECOVERING):
             self.image = pygame.image.load("./images/player/player_recovering_start.png")
-        elif (self.aura_state == entity_state.AuraState.RECOVERING):
+        elif (self.aura_state == entity_state.AuraState.RECOVERING or self.aura_state == entity_state.AuraState.SUB_RECOVERING):
             self.image = pygame.image.load("./images/player/player_recovering.png")
         elif (self.aura_state == entity_state.AuraState.END_RECOVERING1):
             self.image = pygame.image.load("./images/player/player_recovering_full1.png")
@@ -253,7 +278,10 @@ class Player(pygame.sprite.Sprite):
     def update(self):
         self.updateAuraState()
         self.move()
-        self.aura.update(self.rect.x, self.rect.y)
+        if (self.aura_state == entity_state.AuraState.RECOVERING):
+            self.aura.update(self.rect.x, self.rect.y, False)
+        elif (self.aura_state == entity_state.AuraState.SUB_RECOVERING):
+            self.aura.update(self.rect.x, self.rect.y, True)
         self.update_sprite()
         self.shoot()
         
@@ -262,7 +290,8 @@ class Player(pygame.sprite.Sprite):
         self.bullets_group.draw(screen)
         self.hearts_group.draw(screen)
         self.energy.draw(screen)
+        self.sub_energy.draw(screen)
     
         screen.blit(self.image, self.rect)
-        if (self.aura_state == entity_state.AuraState.RECOVERING):
+        if (self.aura_state == entity_state.AuraState.RECOVERING or self.aura_state == entity_state.AuraState.SUB_RECOVERING):
             self.aura.draw(screen)
