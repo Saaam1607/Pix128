@@ -52,7 +52,6 @@ class Button(pygame.sprite.Sprite):
             self.prev_mouse_state = True
             if self.rect.collidepoint(mouse_pos):
                 self.execute_function()
-                print("click")
         elif not mouse_state[0]:
             self.prev_mouse_state = False
     

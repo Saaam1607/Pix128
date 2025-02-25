@@ -5,6 +5,9 @@ from bullet import Bullet
 from heart import Heart
 from energy_bar import EnergyBar
 
+fullRecoverAnimationDelay = 20
+shootingAnimationDelay = 5
+
 
 
 class Player(pygame.sprite.Sprite):
@@ -19,6 +22,8 @@ class Player(pygame.sprite.Sprite):
         self.bullet_speed = bullet_speed
         self.bullet_delay = bullet_delay
         self.bullet_image_path = bullet_image_path
+        self.full_recover_animation_delay = fullRecoverAnimationDelay
+        self.shooting_animation_delay = shootingAnimationDelay
 
         self.x = 0
         self.y = variables.SCREEN_HEIGHT - variables.TERRAIN_HEIGHT - self.height
@@ -29,7 +34,7 @@ class Player(pygame.sprite.Sprite):
         self.hearts_group = pygame.sprite.Group()
         for i in range(lifepoints):
             self.hearts_group.add(Heart(10 + 80 * i, 10, 70, 60, "./images/hearth.png"))
-        self.energy = EnergyBar(energies, energy_recovery_delay)
+        self.energy = EnergyBar(energies, energy_recovery_delay - 1)
         self.shootDelay = variables.BULLET_DELAY
         self.attack_state = entity_state.AttackState.IDLE
 
@@ -57,7 +62,7 @@ class Player(pygame.sprite.Sprite):
         
     def shoot(self):
         mouse_state = pygame.mouse.get_pressed()
-        if mouse_state[0]:
+        if mouse_state[0] and self.attack_state != entity_state.AttackState.RECOVERING and self.attack_state != entity_state.AttackState.END_RECOVERING1 and self.attack_state != entity_state.AttackState.END_RECOVERING2:
             if (self.energy.get_available_energy() >= 5 and self.shootDelay == 0):
                 self.attack_state = entity_state.AttackState.SHOOTING
                 mouse_pos = pygame.mouse.get_pos()
@@ -82,11 +87,13 @@ class Player(pygame.sprite.Sprite):
                 self.shootDelay = variables.BULLET_DELAY
                 self.play_bullets_sound()
         else:
-            self.attack_state = entity_state.AttackState.IDLE
-            if (self.energy.get_available_energy() < self.energies):
-                self.energy.recover_energy()
             if (self.shootDelay > 0):
                 self.shootDelay -= 1
+
+            if (self.attack_state == entity_state.AttackState.RECOVERING):
+                if (self.energy.get_available_energy() < self.energies):
+                    self.energy.recover_energy()
+          
 
 
     def bullets_move(self):
@@ -120,30 +127,58 @@ class Player(pygame.sprite.Sprite):
         dx = 0
         dy = 0
 
+        if (self.attack_state == entity_state.AttackState.RECOVERING and self.energy.get_available_energy() == self.energies):
+            self.attack_state = entity_state.AttackState.END_RECOVERING1
+        elif (self.attack_state == entity_state.AttackState.END_RECOVERING1):
+            if (self.full_recover_animation_delay > 0):
+                self.full_recover_animation_delay -= 1
+            else:
+                self.full_recover_animation_delay = fullRecoverAnimationDelay
+                self.attack_state = entity_state.AttackState.END_RECOVERING2
+        elif (self.attack_state == entity_state.AttackState.END_RECOVERING2):
+            if (self.full_recover_animation_delay > 0):
+                self.full_recover_animation_delay -= 1
+            else:
+                self.full_recover_animation_delay = fullRecoverAnimationDelay
+                self.attack_state = entity_state.AttackState.IDLE
+        elif (self.attack_state == entity_state.AttackState.SHOOTING):
+            if (self.shooting_animation_delay > 0):
+                self.shooting_animation_delay -= 1
+            else:
+                self.shooting_animation_delay = shootingAnimationDelay
+                self.attack_state = entity_state.AttackState.IDLE
+        else:
+            self.attack_state = entity_state.AttackState.IDLE
+
+
         # handle movement keys
         key = pygame.key.get_pressed()
-        if key[pygame.K_a]:
-            if (self.rect.x > 0):
-                dx -= self.speed
-        if key[pygame.K_d]:
-            if (self.rect.x < variables.SCREEN_WIDTH - self.width):
-                dx += self.speed
-        if key[pygame.K_SPACE or pygame.K_w]:
-            if (self.state == entity_state.State.JUMPING and self.canJump):
-                self.state = entity_state.State.DOUBLE_JUMPING
-                self.canJump = False
-                self.gravity = 0 
-                self.play_jump_sound()
-                dy -= variables.PLAYER_JUMP_SPEED
-            if (self.state == entity_state.State.GROUND and self.canJump):
-                self.state = entity_state.State.JUMPING
-                self.canJump = False
-                self.gravity = 0 
-                dy -= variables.PLAYER_JUMP_SPEED
-                self.play_jump_sound()
+        if key[pygame.K_s] and self.gravity == 0 and self.energy.get_available_energy() != self.energies:
+            self.attack_state = entity_state.AttackState.RECOVERING
         else:
-            if (self.state == entity_state.State.JUMPING):
-                self.canJump = True
+            # self.attack_state = entity_state.AttackState.IDLE
+            if key[pygame.K_a]:
+                if (self.rect.x > 0):
+                    dx -= self.speed
+            if key[pygame.K_d]:
+                if (self.rect.x < variables.SCREEN_WIDTH - self.width):
+                    dx += self.speed
+            if key[pygame.K_SPACE or pygame.K_w]:
+                if (self.state == entity_state.State.JUMPING and self.canJump):
+                    self.state = entity_state.State.DOUBLE_JUMPING
+                    self.canJump = False
+                    self.gravity = 0 
+                    self.play_jump_sound()
+                    dy -= variables.PLAYER_JUMP_SPEED
+                if (self.state == entity_state.State.GROUND and self.canJump):
+                    self.state = entity_state.State.JUMPING
+                    self.canJump = False
+                    self.gravity = 0 
+                    dy -= variables.PLAYER_JUMP_SPEED
+                    self.play_jump_sound()
+            else:
+                if (self.state == entity_state.State.JUMPING):
+                    self.canJump = True
         
         # gravity
         self.gravity += 1
@@ -160,13 +195,19 @@ class Player(pygame.sprite.Sprite):
 
 
     def update_sprite(self):
-        if (self.attack_state == entity_state.AttackState.IDLE and self.state == entity_state.State.GROUND):
+        if (self.attack_state == entity_state.AttackState.RECOVERING):
+            self.image = pygame.image.load("./images/player/player_recovering.png")
+        elif (self.attack_state == entity_state.AttackState.END_RECOVERING1):
+            self.image = pygame.image.load("./images/player/player_recovering_full1.png")
+        elif (self.attack_state == entity_state.AttackState.END_RECOVERING2):
+            self.image = pygame.image.load("./images/player/player_recovering_full2.png")
+        elif (self.attack_state == entity_state.AttackState.IDLE and self.state == entity_state.State.GROUND):
             self.image = pygame.image.load("./images/player/player.png")
-        if (self.attack_state == entity_state.AttackState.IDLE and (self.state == entity_state.State.JUMPING or self.state == entity_state.State.DOUBLE_JUMPING)):
+        elif (self.attack_state == entity_state.AttackState.IDLE and (self.state == entity_state.State.JUMPING or self.state == entity_state.State.DOUBLE_JUMPING)):
             self.image = pygame.image.load("./images/player/player_jumping.png")
-        if (self.attack_state == entity_state.AttackState.SHOOTING):
+        elif (self.attack_state == entity_state.AttackState.SHOOTING):
             self.image = pygame.image.load("./images/player/player_shooting.png")
-        if (self.attack_state == entity_state.AttackState.SHOOTING and (self.state == entity_state.State.JUMPING or self.state == entity_state.State.DOUBLE_JUMPING)):
+        elif (self.attack_state == entity_state.AttackState.SHOOTING and (self.state == entity_state.State.JUMPING or self.state == entity_state.State.DOUBLE_JUMPING)):
             self.image = pygame.image.load("./images/player/player_jumping_shooting.png")
         self.image = pygame.transform.scale(self.image, (self.width, self.height))
 
