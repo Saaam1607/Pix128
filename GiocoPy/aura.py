@@ -39,7 +39,7 @@ class Aura(pygame.sprite.Sprite):
         self.frame_counter = 0
         self.first_cycle_complete = False
 
-    def update(self, x, y, isSubAura = False):
+    def update(self, x, y, isEvolved = False):
         self.rect.x = x - 10
         self.rect.y = y - 60
         self.frame_counter += 1
@@ -54,7 +54,7 @@ class Aura(pygame.sprite.Sprite):
             else:
                 self.index = (self.index + 1) % len(aura_images)
 
-            if isSubAura:
+            if isEvolved:
                 self.image = pygame.transform.scale(sub_aura_images[self.index], (140, 180))
             else:
                 self.image = pygame.transform.scale(aura_images[self.index], (140, 180))

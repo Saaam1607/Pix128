@@ -8,25 +8,24 @@ from sub_energy_bar import SubEnergyBar
 from aura import Aura
 
 fullRecoverAnimationDelay = 14
-shootingAnimationDelay = 8
-recoverStartDelay = 20
-subEnergyRequired = 15
+recoverStartDelay = 15
+subEnergyRequired = 30
 
 class Player(pygame.sprite.Sprite):
 
-    def __init__(self, lifepoints, speed, energies, energy_recovery_delay, bullet_speed, bullet_delay, bullet_image_path):
+    def __init__(self, lifepoints, speed, energies, energy_recovery_delay, bullet_speed, bullet_max_speed, bullet_image_path):
         super().__init__()
         self.width = 120
-        self.height = 120
+        self.height = 140
         self.rect = pygame.Rect(0, variables.SCREEN_HEIGHT - variables.TERRAIN_HEIGHT - self.height, self.width, self.height)
         self.speed = speed
         self.energies = energies
         self.sub_energies = 0
         self.bullet_speed = bullet_speed
-        self.bullet_delay = bullet_delay
+        self.bullet_max_speed = bullet_max_speed
         self.bullet_image_path = bullet_image_path
         self.full_recover_animation_delay = fullRecoverAnimationDelay
-        self.shooting_animation_delay = shootingAnimationDelay
+        self.shooting_animation_delay = variables.BULLET_COMBO_DELAY
         self.recover_start_delay = recoverStartDelay
 
         self.x = 0
@@ -34,16 +33,24 @@ class Player(pygame.sprite.Sprite):
         self.state = entity_state.State.GROUND
         self.canJump = True
         self.gravity = 0
+        self.jump_speed = variables.PLAYER_JUMP_SPEED
         self.bullets_group = pygame.sprite.Group()
         self.hearts_group = pygame.sprite.Group()
-        self.number_of_energy_hearts = 0
         for i in range(lifepoints):
             self.hearts_group.add(Heart(10 + 80 * i, 10, 70, 60, "./images/hearth.png"))
         self.energy = EnergyBar(energies, energy_recovery_delay - 1)
         self.sub_energy = SubEnergyBar(subEnergyRequired, energy_recovery_delay + 1)
-        self.shootDelay = variables.BULLET_DELAY
+        
+        self.bullet_delay = variables.BULLET_DELAY
+        self.bullet_long_delay = variables.BULLET_LONG_DELAY
+
+        self.shootDelay = self.bullet_delay
+        self.combo_shoot_delay = variables.BULLET_COMBO_DELAY
         self.attack_state = entity_state.AttackState.IDLE
+        self.combo_state = entity_state.AttackComboState.COMBO_IDLE
+        self.evolution_state = entity_state.EvolutionState.BASE
         self.aura_state = entity_state.AuraState.IDLE
+        
         self.aura = Aura(self.rect.x - 10, self.rect.y - 10)
 
         self.recover_scream = pygame.mixer.Sound("./sounds/recover_scream.mp3")
@@ -83,6 +90,14 @@ class Player(pygame.sprite.Sprite):
         mouse_state = pygame.mouse.get_pressed()
         if mouse_state[0] and self.aura_state == entity_state.AuraState.IDLE:
             if (self.energy.get_available_energy() >= 5 and self.shootDelay == 0):
+                
+                if (self.combo_state == entity_state.AttackComboState.COMBO_IDLE or self.combo_shoot_delay == 0):
+                    self.combo_state = entity_state.AttackComboState.COMBO_1
+                elif (self.combo_state == entity_state.AttackComboState.COMBO_1):
+                    self.combo_state = entity_state.AttackComboState.COMBO_2
+                elif (self.combo_state == entity_state.AttackComboState.COMBO_2):
+                    self.combo_state = entity_state.AttackComboState.COMBO_3
+
                 self.attack_state = entity_state.AttackState.SHOOTING
                 mouse_pos = pygame.mouse.get_pos()
                 self.bullets_group.add(
@@ -94,7 +109,7 @@ class Player(pygame.sprite.Sprite):
                         "rigth",
                         self.bullet_speed,
                         1.2 * self.bullet_speed,
-                        self.bullet_delay,
+                        self.bullet_max_speed,
                         "./images/bullet.png",
                         mouse_pos[0],
                         mouse_pos[1],
@@ -103,11 +118,19 @@ class Player(pygame.sprite.Sprite):
                     )
                 )
                 self.energy.consume_energy()
-                self.shootDelay = variables.BULLET_DELAY
+                
+                if (self.combo_state != entity_state.AttackComboState.COMBO_3):
+                    self.shootDelay = self.bullet_delay
+                else:
+                    self.shootDelay = self.bullet_long_delay
+
+                self.combo_shoot_delay = variables.BULLET_COMBO_DELAY
                 self.play_bullets_sound()
         else:
             if (self.shootDelay > 0):
                 self.shootDelay -= 1
+            if (self.combo_shoot_delay > 0):
+                self.combo_shoot_delay -= 1
 
             if (self.aura_state == entity_state.AuraState.RECOVERING):
                 if (self.energy.get_available_energy() < self.energies):
@@ -115,11 +138,23 @@ class Player(pygame.sprite.Sprite):
             elif (self.aura_state == entity_state.AuraState.SUB_RECOVERING):
                 if (self.sub_energy.get_available_energy() < subEnergyRequired):
                     self.sub_energy.recover_energy()
-          
 
     def bullets_move(self):
         self.bullets_group.update()
 
+    def bustStats(self):
+        self.speed -= 3
+        self.bullet_speed -= 5
+        self.bullet_delay += 2
+        self.bullet_long_delay += 5
+        self.jump_speed += 30
+
+    def resetStats(self):
+        self.speed += 3
+        self.bullet_speed += 5
+        self.bullet_delay -= 2
+        self.bullet_long_delay -= 5
+        self.jump_speed -= 30
 
     def check_bullet_collision(self, enemy_bullets_group):
         for bullet in enemy_bullets_group:
@@ -127,7 +162,9 @@ class Player(pygame.sprite.Sprite):
                 bullet.kill()
                 last_heart = self.hearts_group.sprites()[-1]
                 if (last_heart.image_path == "./images/energy_hearth.png"):
-                    self.number_of_energy_hearts -= 1
+                    self.evolution_state = entity_state.EvolutionState.BASE
+                    self.bustStats()
+                    self.sub_energy.consume_energy()
                 last_heart.kill()
                 if (len(self.hearts_group) > 0):
                     self.play_damage_sound()
@@ -150,7 +187,7 @@ class Player(pygame.sprite.Sprite):
                 if (self.gravity == 0):
                     if (self.energy.get_available_energy() != self.energies or self.sub_energy.get_available_energy() != subEnergyRequired):
                         self.aura_state = entity_state.AuraState.START_RECOVERING
-                    elif (self.sub_energy.get_available_energy() == subEnergyRequired and self.number_of_energy_hearts < 2):
+                    elif (self.sub_energy.get_available_energy() == subEnergyRequired and self.evolution_state == entity_state.EvolutionState.BASE):
                         self.aura_state = entity_state.AuraState.SUB_RECOVERING
                     
             elif (self.aura_state == entity_state.AuraState.START_RECOVERING):
@@ -180,10 +217,10 @@ class Player(pygame.sprite.Sprite):
                 self.aura_state = entity_state.AuraState.END_RECOVERING1
                 self.stop_recover_sound()
                 self.play_aura_end_sound()
-                if (self.number_of_energy_hearts < 2):
-                    self.hearts_group.add(Heart(10 + 80 * len(self.hearts_group), 10, 70, 60, "./images/energy_hearth.png"))
-                    self.number_of_energy_hearts += 1
-                    self.sub_energy.consume_energy()
+                self.evolution_state = entity_state.EvolutionState.EVOLVED
+                self.resetStats()
+                self.hearts_group.add(Heart(10 + 80 * len(self.hearts_group), 10, 70, 60, "./images/energy_hearth.png"))
+
         elif (self.aura_state == entity_state.AuraState.END_RECOVERING1):
             if (self.full_recover_animation_delay > 0):
                 self.full_recover_animation_delay -= 1
@@ -206,7 +243,7 @@ class Player(pygame.sprite.Sprite):
             if (self.shooting_animation_delay > 0):
                 self.shooting_animation_delay -= 1
             else:
-                self.shooting_animation_delay = shootingAnimationDelay
+                self.shooting_animation_delay = variables.BULLET_COMBO_DELAY
                 self.attack_state = entity_state.AttackState.IDLE
 
         # handle movement keys
@@ -225,12 +262,12 @@ class Player(pygame.sprite.Sprite):
                     self.canJump = False
                     self.gravity = 0 
                     self.play_jump_sound()
-                    dy -= variables.PLAYER_JUMP_SPEED
+                    dy -= self.jump_speed
                 if (self.state == entity_state.State.GROUND and self.canJump):
                     self.state = entity_state.State.JUMPING
                     self.canJump = False
                     self.gravity = 0 
-                    dy -= variables.PLAYER_JUMP_SPEED
+                    dy -= self.jump_speed
                     self.play_jump_sound()
             else:
                 if (self.state == entity_state.State.JUMPING):
@@ -251,22 +288,38 @@ class Player(pygame.sprite.Sprite):
 
 
     def update_sprite(self):
+
+        image_path = "./images/player/player.png"
+
         if (self.aura_state == entity_state.AuraState.START_RECOVERING):
-            self.image = pygame.image.load("./images/player/player_recovering_start.png")
+            image_path = "./images/player/player_recovering_start.png"
         elif (self.aura_state == entity_state.AuraState.RECOVERING or self.aura_state == entity_state.AuraState.SUB_RECOVERING):
-            self.image = pygame.image.load("./images/player/player_recovering.png")
+            image_path = "./images/player/player_recovering.png"
         elif (self.aura_state == entity_state.AuraState.END_RECOVERING1):
-            self.image = pygame.image.load("./images/player/player_recovering_full1.png")
+            image_path = "./images/player/player_recovering_full1.png"
         elif (self.aura_state == entity_state.AuraState.END_RECOVERING2):
-            self.image = pygame.image.load("./images/player/player_recovering_full2.png")
+            image_path = "./images/player/player_recovering_full2.png"
         elif (self.attack_state == entity_state.AttackState.IDLE and self.state == entity_state.State.GROUND):
-            self.image = pygame.image.load("./images/player/player.png")
+            image_path = "./images/player/player.png"
         elif (self.attack_state == entity_state.AttackState.IDLE and (self.state == entity_state.State.JUMPING or self.state == entity_state.State.DOUBLE_JUMPING)):
-            self.image = pygame.image.load("./images/player/player_jumping.png")
+            image_path = "./images/player/player_jumping.png"
+        elif (self.combo_state == entity_state.AttackComboState.COMBO_1):
+            image_path = "./images/player/player_shooting.png"
+        elif (self.combo_state == entity_state.AttackComboState.COMBO_2):
+            image_path = "./images/player/player_shooting2.png"
+        elif (self.combo_state == entity_state.AttackComboState.COMBO_3):
+            image_path = "./images/player/player_shooting3.png"
         elif (self.attack_state == entity_state.AttackState.SHOOTING):
-            self.image = pygame.image.load("./images/player/player_shooting.png")
+            image_path = "./images/player/player_shooting.png"
         elif (self.attack_state == entity_state.AttackState.SHOOTING and (self.state == entity_state.State.JUMPING or self.state == entity_state.State.DOUBLE_JUMPING)):
-            self.image = pygame.image.load("./images/player/player_jumping_shooting.png")
+            image_path = "./images/player/player_jumping_shooting.png"
+        if (self.evolution_state == entity_state.EvolutionState.EVOLVED):
+            image_path = image_path.replace(".png", "_evo.png")
+
+        self.image = pygame.image.load(image_path)
+
+
+        
         self.image = pygame.transform.scale(self.image, (self.width, self.height))
 
     
@@ -277,13 +330,15 @@ class Player(pygame.sprite.Sprite):
 
     def update(self):
         self.updateAuraState()
-        self.move()
-        if (self.aura_state == entity_state.AuraState.RECOVERING):
-            self.aura.update(self.rect.x, self.rect.y, False)
-        elif (self.aura_state == entity_state.AuraState.SUB_RECOVERING):
-            self.aura.update(self.rect.x, self.rect.y, True)
+        self.move()        
         self.update_sprite()
         self.shoot()
+
+        if (self.aura_state == entity_state.AuraState.RECOVERING or self.aura_state == entity_state.AuraState.SUB_RECOVERING):
+            if (self.evolution_state == entity_state.EvolutionState.BASE):
+                self.aura.update(self.rect.x, self.rect.y, False)
+            elif (self.evolution_state == entity_state.EvolutionState.EVOLVED):
+                self.aura.update(self.rect.x, self.rect.y, True)
         
         
     def draw(self, screen):
